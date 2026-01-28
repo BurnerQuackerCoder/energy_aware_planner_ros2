@@ -1,0 +1,7 @@
+<library path="energy_aware_planner">
+  <class name="energy_aware_planner/EnergyAwarePlanner" type="energy_aware_planner::EnergyAwarePlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>
+      ROS 2 implementation of Jay Puppala's Energy-Aware Path Planner using Sigmoid weighting.
+    </description>
+  </class>
+</library>
