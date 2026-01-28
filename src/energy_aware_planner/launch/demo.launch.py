@@ -28,5 +28,5 @@ def generate_launch_description():
              arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link']),
 
         # 3. Battery Simulator
-        # Node(package='energy_aware_planner', executable='battery_sim.py', name='battery_sim'),
+        Node(package='energy_aware_planner', executable='battery_sim.py', name='battery_sim'),
     ])

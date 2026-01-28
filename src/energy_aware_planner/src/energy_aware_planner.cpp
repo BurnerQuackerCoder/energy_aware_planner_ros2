@@ -35,7 +35,7 @@ void EnergyAwarePlanner::configure(
 void EnergyAwarePlanner::loadZones() {
   ZoneDefinition hall;
   hall.name = "carpeted_hallway";
-  hall.min_mx = 85; hall.max_mx = 115; 
+  hall.min_mx = 140; hall.max_mx = 170; 
   hall.min_my = 70; hall.max_my = 130;
   hall.energy_usage_factor = 20.0; // High friction penalty
   zones_.push_back(hall);
@@ -62,18 +62,20 @@ double EnergyAwarePlanner::euclideanDist(unsigned int idx1, unsigned int idx2)
 std::vector<unsigned int> EnergyAwarePlanner::getNeighbors(unsigned int index)
 {
   std::vector<unsigned int> neighbors;
-  unsigned int nx = costmap_->getSizeInCellsX();
-  unsigned int ny = costmap_->getSizeInCellsY();
-  unsigned int mx, my;
-  costmap_->indexToCells(index, mx, my);
+  int nx = static_cast<int>(costmap_->getSizeInCellsX());
+  int ny = static_cast<int>(costmap_->getSizeInCellsY());
+  unsigned int mx_u, my_u;
+  costmap_->indexToCells(index, mx_u, my_u);
+  int mx = static_cast<int>(mx_u);
+  int my = static_cast<int>(my_u);
 
   for (int dx = -1; dx <= 1; ++dx) {
     for (int dy = -1; dy <= 1; ++dy) {
       if (dx == 0 && dy == 0) continue;
-      unsigned int nmx = mx + dx;
-      unsigned int nmy = my + dy;
-      if (nmx < nx && nmy < ny) {
-        neighbors.push_back(costmap_->getIndex(nmx, nmy));
+      int nmx = mx + dx;
+      int nmy = my + dy;
+      if (nmx >= 0 && nmx < nx && nmy >= 0 && nmy < ny) {
+        neighbors.push_back(costmap_->getIndex(static_cast<unsigned int>(nmx), static_cast<unsigned int>(nmy)));
       }
     }
   }
@@ -141,6 +143,7 @@ nav_msgs::msg::Path EnergyAwarePlanner::createPlan(
         costmap_->mapToWorld(cmx, cmy, wx, wy);
         pose.pose.position.x = wx;
         pose.pose.position.y = wy;
+        pose.pose.orientation.w = 1.0;
         global_path.poses.push_back(pose);
         curr = came_from[curr];
       }
@@ -174,8 +177,8 @@ void EnergyAwarePlanner::publishZoneMarker()
 
   // Convert map coordinates (10, 50) to world coordinates for display
   double x_min, y_min, x_max, y_max;
-  costmap_->mapToWorld(85, 70, x_min, y_min);
-  costmap_->mapToWorld(115, 130, x_max, y_max);
+  costmap_->mapToWorld(140, 70, x_min, y_min);
+  costmap_->mapToWorld(170, 130, x_max, y_max);
 
   marker.pose.position.x = (x_min + x_max) / 2.0;
   marker.pose.position.y = (y_min + y_max) / 2.0;
@@ -198,5 +201,4 @@ void EnergyAwarePlanner::cleanup() {}
 void EnergyAwarePlanner::activate() {}
 void EnergyAwarePlanner::deactivate() {}
 
-} // namespace energy_aware_planner
-
+}
