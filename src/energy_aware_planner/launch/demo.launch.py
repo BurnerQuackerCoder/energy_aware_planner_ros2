@@ -16,7 +16,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': 'True',
                 'autostart': 'True',
-                'map': os.path.join(pkg_dir, 'maps', 'maze.yaml'),
+                'map': os.path.join(pkg_dir, 'maps', 'complex_maze.yaml'),
                 'params_file': os.path.join(pkg_dir, 'config', 'nav2_params.yaml')
             }.items()
         ),
