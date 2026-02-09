@@ -33,12 +33,26 @@ void EnergyAwarePlanner::configure(
 }
 
 void EnergyAwarePlanner::loadZones() {
-  ZoneDefinition hall;
-  hall.name = "carpeted_hallway";
-  hall.min_mx = 140; hall.max_mx = 170; 
-  hall.min_my = 70; hall.max_my = 130;
-  hall.energy_usage_factor = 20.0; // High friction penalty
-  zones_.push_back(hall);
+  zones_.clear();
+
+  // ZONE A: The "Expensive Shortcut" (Top Lane)
+  ZoneDefinition shortcut;
+  shortcut.name = "heavy_carpet";
+  shortcut.min_mx = 0;   shortcut.max_mx = 200; 
+  shortcut.min_my = 140; shortcut.max_my = 200;
+  shortcut.energy_usage_factor = 25.0; // Extremely high friction
+  zones_.push_back(shortcut);
+
+  // ZONE B: The "Compromise" (Middle Lane)
+  ZoneDefinition middle;
+  middle.name = "standard_rug";
+  middle.min_mx = 0;   middle.max_mx = 200; 
+  middle.min_my = 60;  middle.max_my = 135;
+  middle.energy_usage_factor = 8.0;  // Moderate friction
+  zones_.push_back(middle);
+
+  // ZONE C: The "Efficient Detour" (Bottom Lane)
+  // No zone definition needed; default mu = 1.0 (Smooth Tile)
 }
 
 void EnergyAwarePlanner::batteryCallback(const std_msgs::msg::Float32::SharedPtr msg)
@@ -59,13 +73,13 @@ double EnergyAwarePlanner::euclideanDist(unsigned int idx1, unsigned int idx2)
   return std::hypot(static_cast<double>(mx1) - mx2, static_cast<double>(my1) - my2);
 }
 
-std::vector<unsigned int> EnergyAwarePlanner::getNeighbors(unsigned int index)
-{
+std::vector<unsigned int> EnergyAwarePlanner::getNeighbors(unsigned int index) {
   std::vector<unsigned int> neighbors;
   int nx = static_cast<int>(costmap_->getSizeInCellsX());
   int ny = static_cast<int>(costmap_->getSizeInCellsY());
   unsigned int mx_u, my_u;
   costmap_->indexToCells(index, mx_u, my_u);
+  
   int mx = static_cast<int>(mx_u);
   int my = static_cast<int>(my_u);
 
@@ -74,6 +88,7 @@ std::vector<unsigned int> EnergyAwarePlanner::getNeighbors(unsigned int index)
       if (dx == 0 && dy == 0) continue;
       int nmx = mx + dx;
       int nmy = my + dy;
+      // Fixed pixel underflow check
       if (nmx >= 0 && nmx < nx && nmy >= 0 && nmy < ny) {
         neighbors.push_back(costmap_->getIndex(static_cast<unsigned int>(nmx), static_cast<unsigned int>(nmy)));
       }
@@ -165,36 +180,39 @@ nav_msgs::msg::Path EnergyAwarePlanner::createPlan(
   return global_path;
 }
 
-void EnergyAwarePlanner::publishZoneMarker() 
-{
-  visualization_msgs::msg::Marker marker;
-  marker.header.frame_id = global_frame_;
-  marker.header.stamp = rclcpp::Clock().now();
-  marker.ns = "zones";
-  marker.id = 0;
-  marker.type = visualization_msgs::msg::Marker::CUBE;
-  marker.action = visualization_msgs::msg::Marker::ADD;
+void EnergyAwarePlanner::publishZoneMarker() {
+  // Use local rclcpp::Clock to avoid 'node_' scope errors
+  auto now = rclcpp::Clock().now();
 
-  // Convert map coordinates (10, 50) to world coordinates for display
-  double x_min, y_min, x_max, y_max;
-  costmap_->mapToWorld(140, 70, x_min, y_min);
-  costmap_->mapToWorld(170, 130, x_max, y_max);
+  for (size_t i = 0; i < zones_.size(); ++i) {
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = global_frame_;
+    marker.header.stamp = now;
+    marker.ns = "energy_zones";
+    marker.id = static_cast<int>(i);
+    marker.type = visualization_msgs::msg::Marker::CUBE;
+    marker.action = visualization_msgs::msg::Marker::ADD;
 
-  marker.pose.position.x = (x_min + x_max) / 2.0;
-  marker.pose.position.y = (y_min + y_max) / 2.0;
-  marker.pose.position.z = 0.05; // Slightly above ground
-  
-  marker.scale.x = (x_max - x_min);
-  marker.scale.y = (y_max - y_min);
-  marker.scale.z = 0.01; // Thin flat patch
+    double x_min, y_min, x_max, y_max;
+    costmap_->mapToWorld(zones_[i].min_mx, zones_[i].min_my, x_min, y_min);
+    costmap_->mapToWorld(zones_[i].max_mx, zones_[i].max_my, x_max, y_max);
 
-  // Appearance: Orange for "high friction"
-  marker.color.r = 1.0;
-  marker.color.g = 0.5;
-  marker.color.b = 0.0;
-  marker.color.a = 0.4; // Semi-transparent
+    marker.pose.position.x = (x_min + x_max) / 2.0;
+    marker.pose.position.y = (y_min + y_max) / 2.0;
+    marker.pose.position.z = 0.02;
+    marker.scale.x = std::abs(x_max - x_min);
+    marker.scale.y = std::abs(y_max - y_min);
+    marker.scale.z = 0.01;
 
-  marker_pub_->publish(marker);
+    // Supervisor's request: Different features (Red=Slow/Energy, Yellow=Med)
+    if (zones_[i].energy_usage_factor > 15.0) {
+      marker.color.r = 1.0; marker.color.g = 0.0; marker.color.b = 0.0; // RED
+    } else {
+      marker.color.r = 1.0; marker.color.g = 0.8; marker.color.b = 0.0; // YELLOW
+    }
+    marker.color.a = 0.4;
+    marker_pub_->publish(marker);
+  }
 }
 
 void EnergyAwarePlanner::cleanup() {}
