@@ -38,16 +38,16 @@ void EnergyAwarePlanner::loadZones() {
   // ZONE A: The "Expensive Shortcut" (Top Lane)
   ZoneDefinition shortcut;
   shortcut.name = "heavy_carpet";
-  shortcut.min_mx = 0;   shortcut.max_mx = 200; 
-  shortcut.min_my = 140; shortcut.max_my = 200;
+  shortcut.min_mx = 90;   shortcut.max_mx = 130; 
+  shortcut.min_my = 140; shortcut.max_my = 180;
   shortcut.energy_usage_factor = 25.0; // Extremely high friction
   zones_.push_back(shortcut);
 
   // ZONE B: The "Compromise" (Middle Lane)
   ZoneDefinition middle;
   middle.name = "standard_rug";
-  middle.min_mx = 0;   middle.max_mx = 200; 
-  middle.min_my = 60;  middle.max_my = 135;
+  middle.min_mx = 90;   middle.max_mx = 130; 
+  middle.min_my = 80;  middle.max_my = 120;
   middle.energy_usage_factor = 8.0;  // Moderate friction
   zones_.push_back(middle);
 
@@ -150,6 +150,10 @@ nav_msgs::msg::Path EnergyAwarePlanner::createPlan(
 
     if (current.index == goal_idx) {
       unsigned int curr = goal_idx;
+      // --- DECLARATIONS FOR STEP 3 ---
+      double total_distance = 0.0;
+      double total_energy_weighted_cost = 0.0;
+      // -------------------------------
       while (curr != start_idx) {
         geometry_msgs::msg::PoseStamped pose;
         unsigned int cmx, cmy;
@@ -160,9 +164,54 @@ nav_msgs::msg::Path EnergyAwarePlanner::createPlan(
         pose.pose.position.y = wy;
         pose.pose.orientation.w = 1.0;
         global_path.poses.push_back(pose);
-        curr = came_from[curr];
+        // --- NEW LOGIC FOR STEP 3 ---
+        unsigned int parent = came_from[curr];
+        double step_dist = euclideanDist(parent, curr) * costmap_->getResolution();
+        total_distance += step_dist;
+        
+        // Calculate the mu (friction) of this specific step
+        double mu = 1.0;
+        for (const auto& zone : zones_) {
+            if (cmx >= zone.min_mx && cmx <= zone.max_mx && cmy >= zone.min_my && cmy <= zone.max_my) {
+                mu = zone.energy_usage_factor;
+                break;
+            }
+        }
+        total_energy_weighted_cost += (mu * step_dist);
+        // -----------------------------
+
+        curr = parent;
       }
       std::reverse(global_path.poses.begin(), global_path.poses.end());
+
+      // --- THE "THESIS DEFENSE" LOG ---
+      
+      bool goal_changed = (std::abs(goal.pose.position.x - last_goal_pos_.x) > 0.1 || 
+                     std::abs(goal.pose.position.y - last_goal_pos_.y) > 0.1);
+      bool battery_changed = (std::abs(current_battery_ - last_reported_battery_) > 0.01);
+
+      if (goal_changed || battery_changed) {
+          RCLCPP_INFO(rclcpp::get_logger(name_), "--- Path Optimization Report ---");
+          RCLCPP_INFO(rclcpp::get_logger(name_), "Battery: %.1f%% | Alpha: %.3f", current_battery_ * 100.0, alpha);
+          RCLCPP_INFO(rclcpp::get_logger(name_), "Actual Distance: %.2f meters", total_distance);
+          RCLCPP_INFO(rclcpp::get_logger(name_), "Energy-Weighted Cost: %.2f", total_energy_weighted_cost);
+          
+          if (alpha < 0.1) {
+              RCLCPP_INFO(rclcpp::get_logger(name_), "Mode: PERFORMANCE (Shortest Path)");
+          } else if (alpha > 0.6) {
+              RCLCPP_INFO(rclcpp::get_logger(name_), "Mode: CONSERVATION (Energy Optimal)");
+          } else {
+              RCLCPP_INFO(rclcpp::get_logger(name_), "Mode: BALANCED (Optimization Trade-off)");
+          }
+          RCLCPP_INFO(rclcpp::get_logger(name_), "---------------------------------");
+
+          // Update the "last" states
+          last_reported_battery_ = current_battery_;
+          last_goal_pos_ = goal.pose.position;
+          }
+
+
+        
       return global_path;
     }
 
@@ -181,37 +230,51 @@ nav_msgs::msg::Path EnergyAwarePlanner::createPlan(
 }
 
 void EnergyAwarePlanner::publishZoneMarker() {
-  // Use local rclcpp::Clock to avoid 'node_' scope errors
   auto now = rclcpp::Clock().now();
 
   for (size_t i = 0; i < zones_.size(); ++i) {
-    visualization_msgs::msg::Marker marker;
-    marker.header.frame_id = global_frame_;
-    marker.header.stamp = now;
-    marker.ns = "energy_zones";
-    marker.id = static_cast<int>(i);
-    marker.type = visualization_msgs::msg::Marker::CUBE;
-    marker.action = visualization_msgs::msg::Marker::ADD;
-
+    // 1. PROFESSIONAL SURFACE TEXTURE
+    visualization_msgs::msg::Marker surface;
+    surface.header.frame_id = global_frame_;
+    surface.header.stamp = now;
+    surface.ns = "warehouse_zones";
+    surface.id = static_cast<int>(i);
+    surface.type = visualization_msgs::msg::Marker::CUBE;
+    
     double x_min, y_min, x_max, y_max;
     costmap_->mapToWorld(zones_[i].min_mx, zones_[i].min_my, x_min, y_min);
     costmap_->mapToWorld(zones_[i].max_mx, zones_[i].max_my, x_max, y_max);
 
-    marker.pose.position.x = (x_min + x_max) / 2.0;
-    marker.pose.position.y = (y_min + y_max) / 2.0;
-    marker.pose.position.z = 0.02;
-    marker.scale.x = std::abs(x_max - x_min);
-    marker.scale.y = std::abs(y_max - y_min);
-    marker.scale.z = 0.01;
+    surface.pose.position.x = (x_min + x_max) / 2.0;
+    surface.pose.position.y = (y_min + y_max) / 2.0;
+    surface.pose.position.z = 0.005; // Flush with floor
+    surface.scale.x = std::abs(x_max - x_min);
+    surface.scale.y = std::abs(y_max - y_min);
+    surface.scale.z = 0.001;
 
-    // Supervisor's request: Different features (Red=Slow/Energy, Yellow=Med)
+    // Use "Industrial" Colors (Semi-Transparent)
     if (zones_[i].energy_usage_factor > 15.0) {
-      marker.color.r = 1.0; marker.color.g = 0.0; marker.color.b = 0.0; // RED
+      surface.color.r = 0.8; surface.color.g = 0.0; surface.color.b = 0.0; surface.color.a = 0.25; // Warning Red
     } else {
-      marker.color.r = 1.0; marker.color.g = 0.8; marker.color.b = 0.0; // YELLOW
+      surface.color.r = 0.8; surface.color.g = 0.5; surface.color.b = 0.0; surface.color.a = 0.25; // Caution Amber
     }
-    marker.color.a = 0.4;
-    marker_pub_->publish(marker);
+    marker_pub_->publish(surface);
+
+    // 2. FIXED FLOATING LABELS
+    visualization_msgs::msg::Marker label;
+    label.header.frame_id = global_frame_;
+    label.header.stamp = now;
+    label.ns = "zone_descriptors";
+    label.id = static_cast<int>(i + 100);
+    label.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    label.pose.position.x = surface.pose.position.x;
+    label.pose.position.y = surface.pose.position.y;
+    label.pose.position.z = 1.2; // Float high above robot
+    label.scale.z = 0.4; 
+    label.color.r = 1.0; label.color.g = 1.0; label.color.b = 1.0; label.color.a = 1.0;
+    
+    label.text = (zones_[i].energy_usage_factor > 15.0) ? "[ DANGER: DEBRIS ZONE ]" : "[ CAUTION: HIGH TRAFFIC ]";
+    marker_pub_->publish(label);
   }
 }
 

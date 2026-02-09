@@ -21,12 +21,22 @@ def generate_launch_description():
             }.items()
         ),
 
-        # 2. Static Transforms (The "Fake" Localization)
-        Node(package='tf2_ros', executable='static_transform_publisher',
-             arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom']),
-        Node(package='tf2_ros', executable='static_transform_publisher', 
-             arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link']),
+        # 2. Stable Static Transforms (Pre-positioned for the Demo)
+        # We set the 'map' to 'odom' translation to -4.0 to move the robot to the left
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='map_to_odom',
+            arguments=['-4.0', '0', '0', '0', '0', '0', 'map', 'odom']
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='odom_to_base_link',
+            arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link']
+        ),
 
         # 3. Battery Simulator
         Node(package='energy_aware_planner', executable='battery_sim.py', name='battery_sim'),
+
     ])

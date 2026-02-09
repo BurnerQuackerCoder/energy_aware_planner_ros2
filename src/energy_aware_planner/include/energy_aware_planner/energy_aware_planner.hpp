@@ -78,6 +78,8 @@ private:
   double beta_crit_ = 0.2; 
   double k_sigmoid_ = 10.0; 
   std::vector<ZoneDefinition> zones_;
+  double last_reported_battery_ = -1.0;
+  geometry_msgs::msg::Point last_goal_pos_;
 };
 
 }  // namespace energy_aware_planner
